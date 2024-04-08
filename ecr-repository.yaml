@@ -1,0 +1,21 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECR Repository for the kendra bedrock serverless app
+
+Resources:
+  ECRRepository:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: kendra-bedrock-serverless
+
+Outputs:
+  ECRRepositoryName:
+    Description: The name of the ECR repository
+    Value: !Ref ECRRepository
+    Export:
+      Name: kendra-bedrock-serverless-ecr-name
+
+  ECRRepositoryArn:
+    Description: The ARN of the ECR repository
+    Value: !GetAtt ECRRepository.Arn
+    Export:
+      Name: kendra-bedrock-serverless-ecr-arn

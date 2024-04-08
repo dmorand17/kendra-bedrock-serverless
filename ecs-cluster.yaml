@@ -1,0 +1,235 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: ECS Cluster and Task Definition for the Python app
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: Application
+        Parameters:
+          - ECRRepositoryName
+          - BedRockModelName
+          - KendraIndexId
+      - Label:
+          default: Networking
+        Parameters:
+          - VpcId
+          - PrivateSubnet
+          - PublicSubnet
+    ParameterLabels:
+      ECRRepositoryName:
+        default: ECR repository name
+      
+Parameters:
+  ECRRepositoryName:
+    Type: String
+    Description: The name of the ECR repository to use
+    Default: kendra-bedrock-serverless
+  
+  BedRockModelName:
+    Type: String
+    Default: bedrock_claudev2
+    AllowedValues:
+      - bedrock_claudev2
+      - bedrock_claude
+      - bedrock_titan
+    Description: The name of the bedrock app to use
+
+  KendraIndexId:
+    Type: String
+    Description: The ID of the Kendra index to use
+
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: The VPC to use for the ECS service
+
+  PrivateSubnet:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The private subnets to use for the ECS service
+
+  PublicSubnet:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: The public subnets to use for the ALB
+
+  SSLCertificateArn:
+    Type: String
+    Default: ''
+    Description: The ARN of the SSL certificate to use for the Application Load Balancer (leave empty for HTTP)
+
+Conditions:
+  UseHTTPS: !Not [!Equals [!Ref SSLCertificateArn, '']]
+
+Resources:
+
+
+  ECSCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: kendra-bedrock-serverless-cluster
+
+  ECSTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: kendra-bedrock-serverless
+      TaskRoleArn: !GetAtt ECSTaskRole.Arn
+      ExecutionRoleArn: !GetAtt ECSTaskExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: kendra-bedrock-serverless
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${ECRRepositoryName}:latest
+          PortMappings:
+            - ContainerPort: 8080
+          Environment:
+            - Name: BEDROCK_MODEL_NAME
+              Value: !Ref BedRockModelName
+            - Name: KENDRA_INDEX_ID
+              Value: !Ref KendraIndexId
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ECSLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: kendra-bedrock-app
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      Cpu: 256
+      Memory: 512
+
+  ECSService:
+    Type: AWS::ECS::Service
+    DependsOn:
+      - "ALBListenerHttp"
+    Properties:
+      ServiceName: kendra-bedrock-serverless-service
+      Cluster: !Ref ECSCluster
+      TaskDefinition: !Ref ECSTaskDefinition
+      LaunchType: FARGATE
+      DesiredCount: 2
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !Ref ECSServiceSecurityGroup
+          Subnets: !Ref PrivateSubnet
+      LoadBalancers:
+        - ContainerName: kendra-bedrock-serverless
+          ContainerPort: 8080
+          TargetGroupArn: !Ref ALBTargetGroup
+
+  ECSTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+          - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
+              
+
+  ECSTaskPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: KendraBedrockTaskPolicy
+      PolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Action:
+              - kendra:DescribeIndex
+              - kendra:ListIndices
+              - kendra:Query
+            Resource: !Sub arn:aws:kendra:${AWS::Region}:${AWS::AccountId}:index/${KendraIndexId}
+      Roles:
+        - !Ref ECSTaskRole
+
+  ECSTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: "sts:AssumeRole"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  ECSLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/my-python-app
+      RetentionInDays: 7
+
+  ECSServiceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ECS Service Security Group
+      GroupDescription: Allows inbound traffic on port 8080
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 8080
+          ToPort: 8080
+          SourceSecurityGroupId: !Ref ALBSecurityGroup
+      VpcId: !Ref VpcId
+
+  ALBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: ALB Security Group
+      GroupDescription: Allows inbound traffic on port 80 and 443
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      VpcId: !Ref VpcId
+
+  ALBTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      HealthCheckPath: /
+      Name: kendra-bedrock-serverless-tg
+      Port: 8080
+      Protocol: HTTP
+      TargetType: ip
+      VpcId: !Ref VpcId
+
+  ApplicationLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Scheme: internet-facing
+      SecurityGroups:
+        - !Ref ALBSecurityGroup
+      Subnets: !Ref PublicSubnet
+      Type: application
+
+  ALBListenerHttp:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ALBListenerHttps:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Condition: UseHTTPS
+    Properties:
+      DefaultActions:
+        - Type: forward
+          TargetGroupArn: !Ref ALBTargetGroup
+      LoadBalancerArn: !Ref ApplicationLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      Certificates:
+        - CertificateArn: !Ref SSLCertificateArn
