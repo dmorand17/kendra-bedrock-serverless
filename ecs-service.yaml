@@ -103,7 +103,7 @@ Resources:
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref ECSTaskDefinition
       LaunchType: FARGATE
-      DesiredCount: 2
+      DesiredCount: 1
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -141,6 +141,7 @@ Resources:
               - kendra:DescribeIndex
               - kendra:ListIndices
               - kendra:Query
+              - kendra:Retrieve
             Resource: !Sub arn:aws:kendra:${AWS::Region}:${AWS::AccountId}:index/${KendraIndexId}
       Roles:
         - !Ref ECSTaskRole
@@ -158,10 +159,11 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
+
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: /ecs/my-python-app
+      LogGroupName: /ecs/kendra-bedrock-app
       RetentionInDays: 7
 
   ECSServiceSecurityGroup:
@@ -233,3 +235,14 @@ Resources:
       Protocol: HTTPS
       Certificates:
         - CertificateArn: !Ref SSLCertificateArn
+
+Outputs:
+  ECSCluster:
+    Value: !Ref ECSCluster
+    Description: The ECS cluster to use for the Python app
+  ECSService:
+    Value: !Ref ECSService
+    Description: The ECS service to use for the Python app
+  ApplicationLoadBalancer:
+    Value: !GetAtt ApplicationLoadBalancer.DNSName
+    Description: The ALB to use for the Python app

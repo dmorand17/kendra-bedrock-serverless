@@ -12,10 +12,10 @@ Outputs:
     Description: The name of the ECR repository
     Value: !Ref ECRRepository
     Export:
-      Name: kendra-bedrock-serverless-ecr-name
+      Name: KendraBedrockECRName
 
   ECRRepositoryArn:
     Description: The ARN of the ECR repository
     Value: !GetAtt ECRRepository.Arn
     Export:
-      Name: kendra-bedrock-serverless-ecr-arn
+      Name: KendraBedrockECRArn
