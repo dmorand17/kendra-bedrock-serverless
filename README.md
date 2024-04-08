@@ -4,6 +4,18 @@ This is a sample application to demonstrate how to deploy a python repository in
 
 This example is based off the [amazon-kendra-langchain-extensions](https://github.com/aws-samples/amazon-kendra-langchain-extensions) repo
 
+## Prerequisites
+
+**Build requirements**
+
+- AWS CLI with proper credentials
+- Docker or equivalent container solution (e.g. [finch](https://github.com/runfinch))
+
+**ECS deployment requirements**
+
+- Kendra index
+- VPC w/at least 2 private/public subnets
+
 ## 🏁 Getting Started
 
 1/ Deploy [ecr-repository.yaml](ecr-repository.yaml) CloudFormation template to create ECR repository
