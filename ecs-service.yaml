@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: "2010-09-09"
 Description: ECS Cluster and Task Definition for the Python app
 Metadata:
   AWS::CloudFormation::Interface:
@@ -9,6 +9,8 @@ Metadata:
           - ECRRepositoryName
           - BedRockModelName
           - KendraIndexId
+          # - CpuArchitecture
+          - DesiredCapacity
       - Label:
           default: Networking
         Parameters:
@@ -18,25 +20,42 @@ Metadata:
     ParameterLabels:
       ECRRepositoryName:
         default: ECR repository name
-      
+
 Parameters:
   ECRRepositoryName:
     Type: String
     Description: The name of the ECR repository to use
     Default: kendra-bedrock-serverless
-  
+
   BedRockModelName:
     Type: String
-    Default: bedrock_claudev2
+    Default: bedrock_claudev3_haiku
     AllowedValues:
       - bedrock_claudev2
-      - bedrock_claude
-      - bedrock_titan
+      - bedrock_claudev3_haiku
+      - bedrock_claudev3_sonnet
+      - bedrock_llama2_70b
+      - bedrock_llama2_13b
     Description: The name of the bedrock app to use
 
   KendraIndexId:
     Type: String
     Description: The ID of the Kendra index to use
+
+  # CpuArchitecture:
+  #   Type: String
+  #   Default: X86_64
+  #   AllowedValues:
+  #     - X86_64
+  #     - ARM64
+  #   Description: The CPU architecture to use for the ECS task
+
+  DesiredCapacity:
+    Type: Number
+    Default: 1
+    MinValue: 1
+    MaxValue: 10
+    Description: The desired number of ECS tasks to run
 
   VpcId:
     Type: AWS::EC2::VPC::Id
@@ -52,19 +71,25 @@ Parameters:
 
   SSLCertificateArn:
     Type: String
-    Default: ''
+    Default: ""
     Description: The ARN of the SSL certificate to use for the Application Load Balancer (leave empty for HTTP)
 
 Conditions:
-  UseHTTPS: !Not [!Equals [!Ref SSLCertificateArn, '']]
+  UseHTTPS: !Not [!Equals [!Ref SSLCertificateArn, ""]]
 
 Resources:
-
-
   ECSCluster:
     Type: AWS::ECS::Cluster
     Properties:
       ClusterName: kendra-bedrock-serverless-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE
+          Weight: 1
+        - CapacityProvider: FARGATE_SPOT
+          Weight: 4
 
   ECSTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -78,10 +103,10 @@ Resources:
           PortMappings:
             - ContainerPort: 8080
           Environment:
-            - Name: BEDROCK_MODEL_NAME
-              Value: !Ref BedRockModelName
             - Name: KENDRA_INDEX_ID
               Value: !Ref KendraIndexId
+          Command:
+            - !Ref BedRockModelName
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -93,17 +118,23 @@ Resources:
         - FARGATE
       Cpu: 256
       Memory: 512
+      RuntimePlatform:
+        OperatingSystemFamily: LINUX
+        CpuArchitecture: X86_64
 
   ECSService:
     Type: AWS::ECS::Service
     DependsOn:
       - "ALBListenerHttp"
     Properties:
-      ServiceName: kendra-bedrock-serverless-service
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref ECSTaskDefinition
-      LaunchType: FARGATE
-      DesiredCount: 1
+      DesiredCount: !Ref DesiredCapacity
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
       NetworkConfiguration:
         AwsvpcConfiguration:
           AssignPublicIp: ENABLED
@@ -126,8 +157,7 @@ Resources:
               Service: ecs-tasks.amazonaws.com
             Action: "sts:AssumeRole"
       ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
-              
+        - arn:aws:iam::aws:policy/AmazonBedrockFullAccess
 
   ECSTaskPolicy:
     Type: AWS::IAM::Policy
@@ -158,7 +188,6 @@ Resources:
             Action: "sts:AssumeRole"
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-
 
   ECSLogGroup:
     Type: AWS::Logs::LogGroup
