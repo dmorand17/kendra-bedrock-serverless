@@ -87,7 +87,7 @@ Resources:
         - FARGATE_SPOT
       DefaultCapacityProviderStrategy:
         - CapacityProvider: FARGATE
-          Weight: 1
+          Weight: 0
         - CapacityProvider: FARGATE_SPOT
           Weight: 4
 
@@ -130,6 +130,7 @@ Resources:
       Cluster: !Ref ECSCluster
       TaskDefinition: !Ref ECSTaskDefinition
       DesiredCount: !Ref DesiredCapacity
+      EnableExecuteCommand: true
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         DeploymentCircuitBreaker:
